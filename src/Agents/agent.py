@@ -10,7 +10,7 @@ from src.Utils.memory import RolloutBuffer
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, state_dim, action_dim, action_std_init=0.06):
+    def __init__(self, state_dim, all_state_dim, action_dim, action_std_init=0.06):
         super(ActorCritic, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # actor
@@ -26,7 +26,7 @@ class ActorCritic(nn.Module):
                             )
         logger.info(f"Normal Network initialized for actor")
         self.critic = nn.Sequential(
-                            nn.Linear(state_dim, 64),
+                            nn.Linear(all_state_dim, 64),
                             nn.Tanh(),
                             nn.Linear(64, 32),
                             nn.Tanh(),
@@ -40,23 +40,23 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
     
-    def act(self, state):
-
+    def act(self, state, all_state):
+        
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
 
         action = dist.sample()
         action_logprob = dist.log_prob(action)
-        state_val = self.critic(state)
+        state_val = self.critic(all_state)
 
         return action.detach(), action_logprob.detach(), state_val.detach()
     
-    def evaluate(self, state, action):
+    def evaluate(self, state, all_state, action):
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
-        state_values = self.critic(state)
+        state_values = self.critic(all_state)
         
         return action_logprobs, state_values, dist_entropy
 
@@ -64,7 +64,7 @@ class ActorCritic(nn.Module):
 
 #state_dim, action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, has_continuous_action_space, action_std_init=0.6
 class PPO:
-    def __init__(self, state_dim, action_dim, config):
+    def __init__(self, state_dim, all_state_dim, action_dim, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -75,13 +75,13 @@ class PPO:
         
         self.buffer = RolloutBuffer()
 
-        self.policy = ActorCritic(state_dim, action_dim).to(self.device)
+        self.policy = ActorCritic(state_dim, all_state_dim, action_dim).to(self.device)
         self.optimizer = torch.optim.Adam([
                         {'params': self.policy.actor.parameters(), 'lr': self.config['lr_actor']},
                         {'params': self.policy.critic.parameters(), 'lr': self.config['lr_critic']}
                     ])
 
-        self.policy_old = ActorCritic(state_dim, action_dim).to(self.device)
+        self.policy_old = ActorCritic(state_dim, all_state_dim, action_dim).to(self.device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         
         self.MseLoss = nn.MSELoss()
@@ -90,10 +90,11 @@ class PPO:
     def get_buffer_size(self):
         return len(self.buffer)
 
-    def select_action(self, state):
+    def select_action(self, state, all_state):
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
-            action, action_logprob, state_val = self.policy_old.act(state)
+            all_state = torch.FloatTensor(all_state).to(self.device)
+            action, action_logprob, state_val = self.policy_old.act(state, all_state)
             
             #self.buffer.states.append(state)
             #self.buffer.actions.append(action)
@@ -102,6 +103,23 @@ class PPO:
 
             action = action.item()
             return action, action_logprob, state_val
+
+    def compute_gae(self, rewards, values, dones, gamma=0.99, lam=0.95):
+        """
+        rewards: [T] tensor or list
+        values: [T+1] tensor or list (including bootstrap value for the last state)
+        dones: [T] tensor or list (True if done at time t)
+        returns: advantages [T], returns [T]
+        """
+        advantages = []
+        gae = 0
+        for step in reversed(range(len(rewards))):
+            delta = rewards[step] + gamma * values[step + 1] * (1 - dones[step]) - values[step]
+            gae = delta + gamma * lam * (1 - dones[step]) * gae
+            advantages.insert(0, gae)
+        returns = [adv + v for adv, v in zip(advantages, values[:-1])]
+        return torch.tensor(advantages, dtype=torch.float32), torch.tensor(returns, dtype=torch.float32)
+
 
     def update(self):
         # Monte Carlo estimate of returns
@@ -119,19 +137,19 @@ class PPO:
 
         # convert list to tensor
         old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(self.device)
+        old_global_states = torch.squeeze(torch.stack(self.buffer.global_states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach().to(self.device)
         old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach().to(self.device)
         old_state_values = torch.squeeze(torch.stack(self.buffer.state_values, dim=0)).detach().to(self.device)
 
         # calculate advantages
-        logger.info(f"rewards shape: {rewards.shape}, old_state_values shape: {old_state_values.shape}")
         advantages = rewards.detach() - old_state_values.detach()
 
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
 
             # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions)
+            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_global_states, old_actions)
 
             # match state_values tensor dimensions with rewards tensor
             state_values = torch.squeeze(state_values)
