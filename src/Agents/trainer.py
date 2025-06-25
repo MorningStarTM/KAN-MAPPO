@@ -37,7 +37,8 @@ class MAPPOTrainer:
         self.mappo = MAPPO(self.state_dims, self.n_agents, self.action_dims, self.env, config, scenario)
 
         self.best_score = float('-inf')
-        self.rewards_log = []
+        self.rewards_log = {agent: [] for agent in self.agents}
+
 
     def train(self):
         start_time = datetime.now().replace(microsecond=0)
@@ -73,20 +74,18 @@ class MAPPOTrainer:
                 if all(terminations[a] or truncations[a] for a in self.agents):
                     break
 
-            avg_reward = sum(episode_rewards.values()) / self.n_agents
-            self.rewards_log.append(avg_reward)
+            for agent in self.agents:
+                self.rewards_log[agent].append(episode_rewards[agent])
+
 
             if total_steps % self.config['update_timestep'] == 0:
                 self.mappo.update()
 
-            if total_steps % self.print_freq == 0:
-                logger.info(f"Episode {i_episode}, Timestep {total_steps}, Avg Reward: {avg_reward:.2f}")
+            #if total_steps % self.print_freq == 0:
+            #    logger.info(f"Episode {i_episode}, Timestep {total_steps}, Avg Reward: {avg_reward:.2f}")
 
             if total_steps % self.save_freq == 0:
-                if avg_reward > self.best_score:
-                    self.best_score = avg_reward
-                    logger.info(f"New best avg reward {avg_reward:.2f} at timestep {total_steps}. Saving model.")
-                    self.mappo.save(self.save_dir)
+                self.mappo.save(self.save_dir)
             
             i_episode += 1
 

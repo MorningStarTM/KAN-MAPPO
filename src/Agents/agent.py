@@ -182,6 +182,7 @@ class PPO:
         file = os.path.join(checkpoint_path, filename)
         self.policy_old.load_state_dict(torch.load(file, map_location=lambda storage, loc: storage))
         self.policy.load_state_dict(torch.load(file, map_location=lambda storage, loc: storage))
+        logger.info(f"Loaded model from {file}")
 
 
 
