@@ -4,13 +4,19 @@ import torch
 from src.Agents.mappo import MAPPO
 from src.Utils.logger import logger
 from pettingzoo.mpe import simple_adversary_v3, simple_spread_v3
+from pettingzoo.mpe import simple_tag_v3
 from datetime import datetime
 
 
 class MAPPOTrainer:
-    def __init__(self, config, scenario='simple_adversary_v3'):
+    def __init__(self, config, scenario=None):
         self.env_name = scenario
-        self.env = simple_spread_v3.parallel_env(max_cycles=25, continuous_actions=False)
+        if scenario == 'simple_adversary_v3':
+            self.env = simple_adversary_v3.parallel_env(max_cycles=25, continuous_actions=False)
+        elif scenario == 'simple_spread_v3':
+            self.env = simple_spread_v3.parallel_env(max_cycles=25, continuous_actions=False)
+        elif scenario == "simple_tag_v3":
+            self.env = simple_tag_v3.parallel_env(max_cycles=25, continuous_actions=False)
         self.env.reset()
 
         self.config = config
@@ -79,6 +85,7 @@ class MAPPOTrainer:
 
 
             if total_steps % self.config['update_timestep'] == 0:
+                logger.info(f"Training at episode {i_episode}, total steps {total_steps}, rewards: {episode_rewards}")
                 self.mappo.update()
 
             #if total_steps % self.print_freq == 0:
