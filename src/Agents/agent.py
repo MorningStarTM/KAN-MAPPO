@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.distributions import MultivariateNormal
 from torch.distributions import Categorical
 import os
+import torch.optim as optim
 from src.Utils.logger import logger
 from src.Utils.memory import RolloutBuffer
 
@@ -40,23 +41,24 @@ class ActorCritic(nn.Module):
     def forward(self):
         raise NotImplementedError
     
-    def act(self, state, all_state):
-        
+    def act(self, state, share_net):
+        state = share_net(state)
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
 
         action = dist.sample()
         action_logprob = dist.log_prob(action)
-        state_val = self.critic(all_state)
+        state_val = self.critic(state)
 
         return action.detach(), action_logprob.detach(), state_val.detach()
     
-    def evaluate(self, state, all_state, action):
+    def evaluate(self, state, action, share_net):
+        state = share_net(state)
         action_probs = self.actor(state)
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
-        state_values = self.critic(all_state)
+        state_values = self.critic(state)
         
         return action_logprobs, state_values, dist_entropy
 
@@ -90,11 +92,10 @@ class PPO:
     def get_buffer_size(self):
         return len(self.buffer)
 
-    def select_action(self, state, all_state):
+    def select_action(self, state, shared_net):
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
-            all_state = torch.FloatTensor(all_state).to(self.device)
-            action, action_logprob, state_val = self.policy_old.act(state, all_state)
+            action, action_logprob, state_val = self.policy_old.act(state, shared_net)
             
             #self.buffer.states.append(state)
             #self.buffer.actions.append(action)
@@ -121,7 +122,7 @@ class PPO:
         return torch.tensor(advantages, dtype=torch.float32), torch.tensor(returns, dtype=torch.float32)
 
 
-    def update(self):
+    def update(self, share_net, convnet_optimizer):
         # Monte Carlo estimate of returns
         rewards = []
         discounted_reward = 0
@@ -149,7 +150,7 @@ class PPO:
         for _ in range(self.K_epochs):
 
             # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_global_states, old_actions)
+            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_global_states, old_actions, share_net)
 
             # match state_values tensor dimensions with rewards tensor
             state_values = torch.squeeze(state_values)
@@ -166,8 +167,10 @@ class PPO:
             
             # take gradient step
             self.optimizer.zero_grad()
+            convnet_optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+            convnet_optimizer.step()
             
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
