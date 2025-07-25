@@ -2,13 +2,13 @@ from src.Agents.agent import PPO
 from src.Utils.logger import logger
 import torch
 from src.Agents.shared_network import ConvNet
-
+import cv2
 
 class MAPPO:
-    def __init__(self, actor_dims, n_agents, n_actions, env, config, scenario='default'):
+    def __init__(self, n_actions, env, config, scenario='default'):
         self.agents = {}
         self.agent_ids = env.possible_agents
-        self.n_agents = n_agents
+        self.n_agents = len(self.agent_ids)
         self.critic_dim = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.shared_net = ConvNet().to(device=self.device)
@@ -22,8 +22,7 @@ class MAPPO:
         for agent_idx, agent_name in enumerate(self.agent_ids):
             logger.info(f"Initializing PPO for {agent_name}")
             self.agents[agent_name] = PPO(
-                state_dim=actor_dims[agent_name],
-                all_state_dim=self.critic_dim,
+                state_dim=64 * 23 * 16,
                 action_dim=n_actions[agent_name],
                 config=config
             )
@@ -31,14 +30,21 @@ class MAPPO:
         logger.info(f"MAPPO initialized with {self.n_agents} agents in scenario '{scenario}'")
 
         
+    def preprocess(self, image):
+        obs_resized = cv2.resize(image, (84, 84))  # (120, 128, 3)
+        obs_gray = cv2.cvtColor(obs_resized, cv2.COLOR_RGB2GRAY)
+        obs_gray = obs_gray[:, :, None]
+        obs_tensor = torch.from_numpy(obs_gray.copy()).float().to(self.device)
+        obs_tensor = obs_tensor.unsqueeze(0)         # (1, 120, 128, 3)
+        obs_tensor = obs_tensor.permute(0, 3, 1, 2)  # (1, 3, 120, 128)
+        return obs_tensor
 
     def select_action(self, observations):
         actions = {}
         logprobs = {}
         values = {}
-        global_states = self.aggregate_obs(observations)
         for agent_name in self.agent_ids:
-            action, logprob, value = self.agents[agent_name].select_action(observations[agent_name], global_states)
+            action, logprob, value = self.agents[agent_name].select_action(observations, self.shared_net)
             actions[agent_name] = action
             logprobs[agent_name] = logprob
             values[agent_name] = value
@@ -59,40 +65,6 @@ class MAPPO:
         global_obs = torch.cat(obs_list, dim=-1)
         return global_obs
     
-
-    def select_action_ma(self, observations):
-        """
-        Args:
-            observations (list): List of observation arrays, one per agent
-        Returns:
-            actions (list): List of actions, one per agent
-            logprobs (list): List of logprobs, one per agent
-            values (list): List of value estimates, one per agent
-        """
-        actions = []
-        logprobs = []
-        values = []
-        # Aggregate all observations into a single global state (concatenated)
-        global_state = self.aggregate_obs(observations)
-        for agent_idx, agent_name in enumerate(self.agent_ids):
-            obs = observations[agent_idx]  # MA-Gym: observations is a list!
-            action, logprob, value = self.agents[agent_name].select_action(obs, global_state)
-            actions.append(action)
-            logprobs.append(logprob)
-            values.append(value)
-        return actions, logprobs, values
-
-    def aggregate_obs_ma(self, obs_list):
-        """
-        For MA-Gym: obs_list is a list of np.array or lists
-        Returns a concatenated global state as 1D np.array or tensor
-        """
-        import numpy as np
-        obs_concat = np.concatenate([np.array(obs) for obs in obs_list], axis=-1)
-        return obs_concat
-
-
-
     def store_transition(self, agent_name, state, global_state, action, logprob, value, reward, done):
         agent = self.agents[agent_name]
         agent.buffer.states.append(state)

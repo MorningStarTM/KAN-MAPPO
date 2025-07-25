@@ -11,7 +11,7 @@ from src.Utils.memory import RolloutBuffer
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, state_dim, all_state_dim, action_dim, action_std_init=0.06):
+    def __init__(self, state_dim, action_dim, action_std_init=0.06):
         super(ActorCritic, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # actor
@@ -27,7 +27,7 @@ class ActorCritic(nn.Module):
                             )
         logger.info(f"Normal Network initialized for actor")
         self.critic = nn.Sequential(
-                            nn.Linear(all_state_dim, 64),
+                            nn.Linear(state_dim, 64),
                             nn.Tanh(),
                             nn.Linear(64, 32),
                             nn.Tanh(),
@@ -66,7 +66,7 @@ class ActorCritic(nn.Module):
 
 #state_dim, action_dim, lr_actor, lr_critic, gamma, K_epochs, eps_clip, has_continuous_action_space, action_std_init=0.6
 class PPO:
-    def __init__(self, state_dim, all_state_dim, action_dim, config):
+    def __init__(self, state_dim, action_dim, config):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -77,13 +77,13 @@ class PPO:
         
         self.buffer = RolloutBuffer()
 
-        self.policy = ActorCritic(state_dim, all_state_dim, action_dim).to(self.device)
+        self.policy = ActorCritic(state_dim, action_dim).to(self.device)
         self.optimizer = torch.optim.Adam([
                         {'params': self.policy.actor.parameters(), 'lr': self.config['lr_actor']},
                         {'params': self.policy.critic.parameters(), 'lr': self.config['lr_critic']}
                     ])
 
-        self.policy_old = ActorCritic(state_dim, all_state_dim, action_dim).to(self.device)
+        self.policy_old = ActorCritic(state_dim, action_dim).to(self.device)
         self.policy_old.load_state_dict(self.policy.state_dict())
         
         self.MseLoss = nn.MSELoss()
@@ -94,7 +94,11 @@ class PPO:
 
     def select_action(self, state, shared_net):
         with torch.no_grad():
-            state = torch.FloatTensor(state).to(self.device)
+            if not torch.is_tensor(state):
+                state = torch.FloatTensor(state)
+            state = state.to(self.device)
+            if state.dim() == 3:  # (H, W, C)
+                state = state.unsqueeze(0)
             action, action_logprob, state_val = self.policy_old.act(state, shared_net)
             
             #self.buffer.states.append(state)

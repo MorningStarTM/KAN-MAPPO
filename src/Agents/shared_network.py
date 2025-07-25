@@ -10,7 +10,7 @@ import torch.nn.functional as F
 class ConvNet(nn.Module):
     def __init__(self):
         super(ConvNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=8, stride=4)   # (210, 160, 3) -> (32, 52, 39)
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=8, stride=4)   # (210, 160, 3) -> (32, 52, 39)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)  # (32, 52, 39) -> (64, 25, 18)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)  # (64, 25, 18) -> (64, 23, 16)
         
@@ -18,9 +18,11 @@ class ConvNet(nn.Module):
         self.flattened_size = 64 * 23 * 16
 
     def forward(self, x):
-        x = x.permute(0, 3, 1, 2)  # Change from (B, H, W, C) to (B, C, H, W) if needed
+        # x is already (B, 1, 84, 84)
+        print("ConvNet input shape:", x.shape)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = x.view(x.size(0), -1)
         return x
+

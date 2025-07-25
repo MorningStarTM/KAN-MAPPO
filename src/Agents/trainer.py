@@ -76,6 +76,7 @@ class MAPPOTrainer:
 
                 obs = next_obs
                 total_steps += 1
+                logger.info(f"Step {step}/{self.config['max_ep_len']}, Total Steps: {total_steps}")
 
                 if all(terminations[a] or truncations[a] for a in self.agents):
                     break
