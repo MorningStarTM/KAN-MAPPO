@@ -19,10 +19,9 @@ class ConvNet(nn.Module):
 
     def forward(self, x):
         # x is already (B, 1, 84, 84)
-        print("ConvNet input shape:", x.shape)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
-        x = x.view(x.size(0), -1)
+        x = x.reshape(x.size(0), -1)
         return x
 

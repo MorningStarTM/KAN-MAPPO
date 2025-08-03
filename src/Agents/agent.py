@@ -141,12 +141,10 @@ class PPO:
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(self.device)
-        old_global_states = torch.squeeze(torch.stack(self.buffer.global_states, dim=0)).detach().to(self.device)
+        old_states = torch.stack(self.buffer.states, dim=0).to(self.device)
         old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach().to(self.device)
         old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach().to(self.device)
         old_state_values = torch.squeeze(torch.stack(self.buffer.state_values, dim=0)).detach().to(self.device)
-
         # calculate advantages
         advantages = rewards.detach() - old_state_values.detach()
 
@@ -154,7 +152,7 @@ class PPO:
         for _ in range(self.K_epochs):
 
             # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_global_states, old_actions, share_net)
+            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions, share_net)
 
             # match state_values tensor dimensions with rewards tensor
             state_values = torch.squeeze(state_values)

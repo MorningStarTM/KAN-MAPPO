@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from src.Agents.mappo import MAPPO
 from src.Utils.logger import logger
-from pettingzoo.mpe import simple_adversary_v3, simple_spread_v3
+from pettingzoo.atari import space_invaders_v2
 from pettingzoo.mpe import simple_tag_v3
 from datetime import datetime
 
@@ -11,21 +11,16 @@ from datetime import datetime
 class MAPPOTrainer:
     def __init__(self, config, scenario=None):
         self.env_name = scenario
-        if scenario == 'simple_adversary_v3':
-            self.env = simple_adversary_v3.parallel_env(max_cycles=25, continuous_actions=False)
-        elif scenario == 'simple_spread_v3':
-            self.env = simple_spread_v3.parallel_env(max_cycles=25, continuous_actions=False)
-        elif scenario == "simple_tag_v3":
-            self.env = simple_tag_v3.parallel_env(max_cycles=25, continuous_actions=False)
-        self.env.reset()
+        self.env = space_invaders_v2.parallel_env()
 
         self.config = config
         self.agents = self.env.possible_agents
         self.n_agents = len(self.agents)
         logger.info(f"Initialized environment '{self.env_name}' with {self.n_agents}")
 
-        self.state_dims = {agent: self.env.observation_space(agent).shape[0] for agent in self.agents}
-        self.action_dims = {agent: self.env.action_space(agent).n for agent in self.agents}
+        observations, infos = self.env.reset()
+        self.actor_dims = {agent: observations[agent].shape[0] if len(observations[agent].shape)==1 else np.prod(observations[agent].shape) for agent in self.env.agents}
+        self.n_actions = {agent: self.env.action_space(agent).n for agent in self.env.agents}
 
         self.save_dir = os.path.join("models", scenario)
         os.makedirs(self.save_dir, exist_ok=True)
@@ -40,7 +35,8 @@ class MAPPOTrainer:
         self.print_freq = config['print_freq']
         self.save_freq = config['save_model_freq']
 
-        self.mappo = MAPPO(self.state_dims, self.n_agents, self.action_dims, self.env, config, scenario)
+        self.mappo = MAPPO(self.n_actions, self.env, config, scenario)
+        logger.info(f"MAPPO initialized with {self.n_agents} agents in scenario '{scenario}'")
 
         self.best_score = float('-inf')
         self.rewards_log = {agent: [] for agent in self.agents}
@@ -60,12 +56,13 @@ class MAPPOTrainer:
             for step in range(1, self.config['max_ep_len'] + 1):
                 actions, logprobs, values = self.mappo.select_action(obs)
                 next_obs, rewards, terminations, truncations, _ = self.env.step(actions)
-
+                  
                 for agent in self.agents:
+                    proc = self.mappo.preprocess(obs[agent])  # shape: [1, 1, 84, 84]
+                    state_to_store = proc.squeeze(0)
                     self.mappo.store_transition(
                         agent_name=agent,
-                        state=torch.tensor(obs[agent], dtype=torch.float32),
-                        global_state=self.mappo.aggregate_obs(obs),
+                        state=torch.tensor(state_to_store.cpu(), dtype=torch.float32),
                         action=actions[agent],
                         logprob=logprobs[agent],
                         value=values[agent],
@@ -76,7 +73,6 @@ class MAPPOTrainer:
 
                 obs = next_obs
                 total_steps += 1
-                logger.info(f"Step {step}/{self.config['max_ep_len']}, Total Steps: {total_steps}")
 
                 if all(terminations[a] or truncations[a] for a in self.agents):
                     break
@@ -97,6 +93,7 @@ class MAPPOTrainer:
             
             i_episode += 1
 
-        self.env.close()
+        
         np.save(os.path.join(self.log_dir, f"{self.env_name}_rewards.npy"), np.array(self.rewards_log))
         logger.info(f"Training complete. Rewards saved to {self.log_dir}")
+        self.env.close()

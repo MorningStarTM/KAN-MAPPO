@@ -22,7 +22,7 @@ class MAPPO:
         for agent_idx, agent_name in enumerate(self.agent_ids):
             logger.info(f"Initializing PPO for {agent_name}")
             self.agents[agent_name] = PPO(
-                state_dim=64 * 23 * 16,
+                state_dim=64*7*7,
                 action_dim=n_actions[agent_name],
                 config=config
             )
@@ -44,7 +44,7 @@ class MAPPO:
         logprobs = {}
         values = {}
         for agent_name in self.agent_ids:
-            action, logprob, value = self.agents[agent_name].select_action(observations, self.shared_net)
+            action, logprob, value = self.agents[agent_name].select_action(self.preprocess(observations[agent_name]), self.shared_net)
             actions[agent_name] = action
             logprobs[agent_name] = logprob
             values[agent_name] = value
@@ -65,10 +65,9 @@ class MAPPO:
         global_obs = torch.cat(obs_list, dim=-1)
         return global_obs
     
-    def store_transition(self, agent_name, state, global_state, action, logprob, value, reward, done):
+    def store_transition(self, agent_name, state, action, logprob, value, reward, done):
         agent = self.agents[agent_name]
         agent.buffer.states.append(state)
-        agent.buffer.global_states.append(global_state)
         agent.buffer.actions.append(torch.tensor(action).to(agent.device))
         agent.buffer.logprobs.append(torch.tensor(logprob).to(agent.device))
         agent.buffer.state_values.append(torch.tensor(value).to(agent.device))
@@ -78,7 +77,7 @@ class MAPPO:
     def update(self):
         for agent_name in self.agent_ids:
             logger.info(f"Updating agent {agent_name}")
-            self.agents[agent_name].update(shared_net=self.shared_net, convnet_optimizer=self.convnet_optimizer)
+            self.agents[agent_name].update(share_net=self.shared_net, convnet_optimizer=self.convnet_optimizer)
 
     def save(self, path):
         for agent_name in self.agent_ids:
