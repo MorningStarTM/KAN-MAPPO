@@ -12,7 +12,7 @@ from src.Agents.kan import KANLayer
 
 class KANActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, action_std_init=0.06):
-        super(ActorCritic, self).__init__()
+        super(KANActorCritic, self).__init__()
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # actor
         self.actor = nn.Sequential(
@@ -27,8 +27,6 @@ class KANActorCritic(nn.Module):
                 nn.LayerNorm(64),
                 KANLayer([64, 32, 1]),
         )
-
-
 
     def forward(self):
         raise NotImplementedError
