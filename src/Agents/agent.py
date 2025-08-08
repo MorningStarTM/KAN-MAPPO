@@ -6,9 +6,54 @@ import os
 import torch.optim as optim
 from src.Utils.logger import logger
 from src.Utils.memory import RolloutBuffer
+from src.Agents.kan import KANLayer
 
 
 
+class KANActorCritic(nn.Module):
+    def __init__(self, state_dim, action_dim, action_std_init=0.06):
+        super(ActorCritic, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # actor
+        self.actor = nn.Sequential(
+                KANLayer([state_dim, 128, 64]),  
+                nn.LayerNorm(64),
+                KANLayer([64, 32, action_dim]), 
+                nn.Softmax(dim=-1)
+        )
+        logger.info(f"Normal Network initialized for actor")
+        self.critic = nn.Sequential(
+                KANLayer([state_dim, 128, 64]),
+                nn.LayerNorm(64),
+                KANLayer([64, 32, 1]),
+        )
+
+
+
+    def forward(self):
+        raise NotImplementedError
+    
+    def act(self, state, share_net):
+        state = share_net(state)
+        action_probs = self.actor(state)
+        dist = Categorical(action_probs)
+
+        action = dist.sample()
+        action_logprob = dist.log_prob(action)
+        state_val = self.critic(state)
+
+        return action.detach(), action_logprob.detach(), state_val.detach()
+    
+    def evaluate(self, state, action, share_net):
+        state = share_net(state)
+        action_probs = self.actor(state)
+        dist = Categorical(action_probs)
+        action_logprobs = dist.log_prob(action)
+        dist_entropy = dist.entropy()
+        state_values = self.critic(state)
+        
+        return action_logprobs, state_values, dist_entropy
+    
 
 class ActorCritic(nn.Module):
     def __init__(self, state_dim, action_dim, action_std_init=0.06):
@@ -77,13 +122,24 @@ class PPO:
         
         self.buffer = RolloutBuffer()
 
-        self.policy = ActorCritic(state_dim, action_dim).to(self.device)
+        if self.config['shared_type'] == "cnn":
+            self.policy = ActorCritic(state_dim, action_dim).to(self.device)
+            logger.info(f"Normal Network initialized for actor")
+        elif self.config['shared_type'] == "kan":
+            self.policy = KANActorCritic(state_dim, action_dim).to(self.device)
+            logger.info(f"KAN Network initialized for actor")
+
         self.optimizer = torch.optim.Adam([
                         {'params': self.policy.actor.parameters(), 'lr': self.config['lr_actor']},
                         {'params': self.policy.critic.parameters(), 'lr': self.config['lr_critic']}
                     ])
 
-        self.policy_old = ActorCritic(state_dim, action_dim).to(self.device)
+        if self.config['shared_type'] == "cnn":
+            self.policy_old = ActorCritic(state_dim, action_dim).to(self.device)
+            logger.info(f"Normal Network initialized for actor")
+        elif self.config['shared_type'] == "kan":
+            self.policy_old = KANActorCritic(state_dim, action_dim).to(self.device)
+            logger.info(f"KAN Network initialized for actor")
         self.policy_old.load_state_dict(self.policy.state_dict())
         
         self.MseLoss = nn.MSELoss()

@@ -1,7 +1,7 @@
 from src.Agents.agent import PPO
 from src.Utils.logger import logger
 import torch
-from src.Agents.shared_network import ConvNet
+from src.Agents.shared_network import ConvNet, KANConvNet
 import cv2
 
 class MAPPO:
@@ -11,7 +11,13 @@ class MAPPO:
         self.n_agents = len(self.agent_ids)
         self.critic_dim = 0
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.shared_net = ConvNet().to(device=self.device)
+        if config['shared_type'] == 'cnn':
+            self.shared_net = ConvNet().to(device=self.device)
+            logger.info("Using ConvNet as shared network")
+        elif config['shared_type'] == 'kan':
+            self.shared_net = KANConvNet().to(device=self.device)
+            logger.info("Using KANConvNet as shared network")
+
         self.convnet_optimizer = torch.optim.Adam(self.shared_net.parameters(), lr=config['lr_convnet'])
 
         for i in self.agent_ids:
